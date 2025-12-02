@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>極光行旅 Aurora Planner</title>
+    
+    <!-- iOS Web App 設定 (讓它看起來像原生 APP) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="極光行旅">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3063/3063205.png">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 設定 Tailwind 安全區域 -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            padding: {
+              'safe-top': 'env(safe-area-inset-top)',
+              'safe-bottom': 'env(safe-area-inset-bottom)',
+            }
+          }
+        }
+      }
+    </script>
+
+    <!-- Import Map: 告訴瀏覽器去哪裡抓 React 套件 -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.263.1"
+      }
+    }
+    </script>
+    
+    <!-- Babel: 讓瀏覽器看不懂的 JSX 轉成懂的 JS -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* 隱藏捲軸但保持功能 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        body { -webkit-tap-highlight-color: transparent; }
+    </style>
+</head>
+<body class="bg-gray-50 text-slate-800 h-[100dvh] w-screen overflow-hidden">
+    <div id="root" class="h-full w-full"></div>
+
+    <!-- 主程式邏輯 -->
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+          Calendar, MapPin, DollarSign, CloudSun, CloudSnow, Sun, 
+          Clock, Plus, Trash2, Hotel, Car, Navigation, CloudRain 
+        } from 'lucide-react';
+
+        // --- 初始資料 ---
+        const INITIAL_ITINERARY = [
+          {
+            id: 1,
+            date: '2026-03-27',
+            dayOfWeek: '五',
+            location: 'Fairbanks',
+            accommodation: 'Minnie Street B&B',
+            transport: '租車 (Hertz)',
+            weather: null,
+            activities: [
+              { time: '14:00', title: '抵達 Fairbanks 機場', note: '取車', type: 'transport' },
+              { time: '16:00', title: 'Pioneer Park', note: '只有夏天有開, 但可拍照', type: 'sightseeing' },
+              { time: '18:00', title: '晚餐', note: '泰式料理', type: 'food' },
+              { time: '22:00', title: '追極光', note: '往主要公路開', type: 'highlight' }
+            ]
+          },
+          {
+            id: 2,
+            date: '2026-03-28',
+            dayOfWeek: '六',
+            location: 'North Pole',
+            accommodation: 'Minnie Street B&B',
+            transport: '租車',
+            weather: null,
+            activities: [
+              { time: '10:00', title: '聖誕老人屋', note: '寄明信片', type: 'sightseeing' },
+              { time: '13:00', title: '阿拉斯加大學博物館 (UAF)', note: '門票 $10', type: 'sightseeing' },
+              { time: '15:00', title: '莫里斯湯普森文化中心', note: '領取極光證書', type: 'sightseeing' },
+              { time: '20:00', title: 'Chena Hot Springs', note: '泡溫泉看極光', type: 'highlight' }
+            ]
+          },
+          {
+            id: 3,
+            date: '2026-03-29',
+            dayOfWeek: '日',
+            location: 'Fairbanks',
+            accommodation: 'Chandalar Ranch',
+            transport: '租車',
+            weather: null,
+            activities: [
+              { time: '11:00', title: '黃金心臟公園', note: '市區逛逛', type: 'sightseeing' },
+              { time: '14:00', title: '狗拉雪橇', note: '需提前預約', type: 'activity' }
+            ]
+          }
+        ];
+
+        const INITIAL_EXPENSES = [
+          { id: 1, item: 'UAF 博物館門票', amount: 10, currency: 'USD', category: '票券', date: '2026-03-28' },
+          { id: 2, item: '租車費用 (3天)', amount: 298, currency: 'USD', category: '交通', date: '2026-03-27' },
+          { id: 3, item: 'B&B 住宿費', amount: 350, currency: 'USD', category: '住宿', date: '2026-03-27' },
+        ];
+
+        // --- 主元件 ---
+        function TravelPlanner() {
+          const [activeTab, setActiveTab] = useState('itinerary');
+          
+          // LocalStorage 讀取
+          const [itinerary, setItinerary] = useState(() => {
+            try {
+              const saved = localStorage.getItem('aurora_itinerary');
+              return saved ? JSON.parse(saved) : INITIAL_ITINERARY;
+            } catch (e) { return INITIAL_ITINERARY; }
+          });
+
+          const [expenses, setExpenses] = useState(() => {
+            try {
+              const saved = localStorage.getItem('aurora_expenses');
+              return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+            } catch (e) { return INITIAL_EXPENSES; }
+          });
+
+          const [showAddExpense, setShowAddExpense] = useState(false);
+          const [exchangeRate, setExchangeRate] = useState(32.5);
+          const [newExpense, setNewExpense] = useState({ item: '', amount: '', category: '餐飲', currency: 'USD' });
+
+          // LocalStorage 儲存
+          useEffect(() => { localStorage.setItem('aurora_itinerary', JSON.stringify(itinerary)); }, [itinerary]);
+          useEffect(() => { localStorage.setItem('aurora_expenses', JSON.stringify(expenses)); }, [expenses]);
+
+          // 天氣功能
+          const fetchWeather = () => {
+            const updatedItinerary = itinerary.map(day => {
+              const types = ['snow', 'clear', 'cloudy', 'snow', 'clear'];
+              const randomType = types[Math.floor(Math.random() * types.length)];
+              const randomTemp = Math.floor(Math.random() * 10) - 15;
+              return { ...day, weather: { type: randomType, temp: randomTemp } };
+            });
+            setItinerary(updatedItinerary);
+            alert("已模擬更新當地天氣資訊！");
+          };
+
+          const handleAddExpense = () => {
+            if (!newExpense.item || !newExpense.amount) return;
+            const expense = {
+              id: Date.now(),
+              ...newExpense,
+              amount: parseFloat(newExpense.amount),
+              date: new Date().toISOString().split('T')[0]
+            };
+            setExpenses([...expenses, expense]);
+            setNewExpense({ item: '', amount: '', category: '餐飲', currency: 'USD' });
+            setShowAddExpense(false);
+          };
+
+          const WeatherIcon = ({ type }) => {
+            switch (type) {
+              case 'snow': return <CloudSnow className="w-6 h-6 text-blue-300" />;
+              case 'clear': return <Sun className="w-6 h-6 text-yellow-400" />;
+              case 'cloudy': return <CloudSun className="w-6 h-6 text-gray-400" />;
+              case 'rain': return <CloudRain className="w-6 h-6 text-blue-400" />;
+              default: return <div className="text-xs text-gray-400">點擊更新</div>;
+            }
+          };
+
+          const totalExpenseUSD = expenses.filter(e => e.currency === 'USD').reduce((sum, e) => sum + e.amount, 0);
+          const totalExpenseTWD = totalExpenseUSD * exchangeRate;
+
+          // --- 畫面渲染 ---
+          return (
+            <div className="max-w-md mx-auto bg-gray-50 h-full flex flex-col font-sans relative shadow-2xl">
+              
+              {/* Header */}
+              <div className="bg-white px-4 py-3 shrink-0 border-b border-gray-200 flex flex-col justify-end pt-safe-top z-20">
+                <h1 className="text-xl font-black text-center text-slate-800 tracking-tight">AURORA TRIP 2026</h1>
+                <p className="text-center text-xs text-slate-400 font-medium">Alaska, Fairbanks</p>
+              </div>
+
+              {/* Scrollable Content */}
+              <div className="flex-1 overflow-y-auto overscroll-contain no-scrollbar relative z-10 bg-gray-50">
+                
+                {/* 行程分頁 */}
+                {activeTab === 'itinerary' && (
+                  <div className="space-y-6 pb-24 pt-4 px-4">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <Calendar className="w-5 h-5" /> 逐日行程
+                      </h2>
+                      <button onClick={fetchWeather} className="bg-blue-100 text-blue-600 px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-1 hover:bg-blue-200 transition">
+                        <CloudSun className="w-4 h-4" /> 更新天氣
+                      </button>
+                    </div>
+
+                    {itinerary.map((day) => (
+                      <div key={day.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="bg-slate-50 p-4 border-b border-gray-100 flex justify-between items-center">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-lg text-slate-700">{day.date}</span>
+                              <span className="text-sm bg-slate-200 text-slate-600 px-2 py-0.5 rounded">週{day.dayOfWeek}</span>
+                            </div>
+                            <div className="text-sm text-gray-500 mt-1 flex items-center gap-1">
+                              <MapPin className="w-3 h-3" /> {day.location}
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-center justify-center bg-white px-3 py-1 rounded-lg border border-gray-100 min-w-[70px]">
+                            {day.weather ? <><WeatherIcon type={day.weather.type} /><span className="text-xs font-bold text-slate-600">{day.weather.temp}°C</span></> : <span className="text-xs text-gray-400">天氣?</span>}
+                          </div>
+                        </div>
+
+                        {/* 住宿交通 */}
+                        <div className="px-4 py-3 bg-blue-50/50 flex flex-wrap gap-4 text-sm text-gray-600 border-b border-gray-100">
+                           {day.accommodation && <div className="flex items-center gap-1.5"><Hotel className="w-4 h-4 text-blue-500" /><span>{day.accommodation}</span></div>}
+                           {day.transport && <div className="flex items-center gap-1.5"><Car className="w-4 h-4 text-green-500" /><span>{day.transport}</span></div>}
+                        </div>
+
+                        {/* 時間軸 */}
+                        <div className="p-4 space-y-4 relative">
+                          <div className="absolute left-[27px] top-4 bottom-4 w-0.5 bg-gray-200"></div>
+                          {day.activities.map((act, idx) => (
+                            <div key={idx} className="relative flex items-start gap-4">
+                              <div className="z-10 bg-white border-2 border-blue-500 text-blue-600 text-xs font-bold rounded-full w-14 h-6 flex items-center justify-center shrink-0 shadow-sm">{act.time}</div>
+                              <div className={`flex-1 p-3 rounded-lg text-sm ${act.type === 'highlight' ? 'bg-indigo-50 border border-indigo-100' : 'bg-gray-50'}`}>
+                                <div className="font-semibold text-gray-800 flex justify-between">{act.title}{act.type === 'highlight' && <span className="text-xs text-indigo-500 font-bold bg-white px-1.5 rounded border border-indigo-200">★</span>}</div>
+                                {act.note && <div className="text-gray-500 mt-1 text-xs leading-relaxed">{act.note}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 預算分頁 */}
+                {activeTab === 'budget' && (
+                  <div className="space-y-6 pb-24 pt-4 px-4">
+                    <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+                       <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -mr-10 -mt-10 blur-xl"></div>
+                       <h2 className="text-emerald-100 text-sm font-medium mb-1">總預估花費 (USD)</h2>
+                       <div className="text-4xl font-bold mb-2 tracking-tight">${totalExpenseUSD.toLocaleString()}</div>
+                       <div className="text-emerald-100 text-sm flex items-center gap-2"><span className="bg-white/20 px-2 py-0.5 rounded text-xs">TWD</span> {totalExpenseTWD.toLocaleString()}</div>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-bold text-gray-700">支出明細</h3>
+                      <button onClick={() => setShowAddExpense(!showAddExpense)} className="text-sm bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full font-medium hover:bg-emerald-200">+ 新增</button>
+                    </div>
+
+                    {showAddExpense && (
+                      <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm animate-in fade-in slide-in-from-top-2">
+                        <div className="grid grid-cols-2 gap-3 mb-3">
+                          <input type="text" placeholder="項目" className="col-span-2 border p-2 rounded text-sm outline-none focus:ring-2 ring-emerald-200" value={newExpense.item} onChange={e => setNewExpense({...newExpense, item: e.target.value})} />
+                          <input type="number" placeholder="金額" className="border p-2 rounded text-sm outline-none focus:ring-2 ring-emerald-200" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} />
+                          <select className="border p-2 rounded text-sm outline-none" value={newExpense.category} onChange={e => setNewExpense({...newExpense, category: e.target.value})}><option>餐飲</option><option>住宿</option><option>交通</option><option>票券</option><option>購物</option></select>
+                        </div>
+                        <button onClick={handleAddExpense} className="w-full bg-emerald-500 text-white py-2 rounded-lg text-sm font-medium hover:bg-emerald-600">確認</button>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      {expenses.map((expense) => (
+                        <div key={expense.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${expense.category === '住宿' ? 'bg-purple-100 text-purple-500' : expense.category === '交通' ? 'bg-blue-100 text-blue-500' : 'bg-orange-100 text-orange-500'}`}><DollarSign className="w-5 h-5" /></div>
+                            <div className="min-w-0"><div className="font-medium text-gray-800 truncate">{expense.item}</div><div className="text-xs text-gray-400">{expense.date} · {expense.category}</div></div>
+                          </div>
+                          <div className="font-bold text-gray-700 whitespace-nowrap ml-2">{expense.currency} {expense.amount}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Navigation */}
+              <div className="shrink-0 bg-white border-t border-gray-200 px-6 py-2 pb-safe-bottom flex justify-around items-center z-30">
+                <button onClick={() => setActiveTab('itinerary')} className={`flex flex-col items-center gap-1 p-2 rounded-lg transition active:scale-95 ${activeTab === 'itinerary' ? 'text-blue-600' : 'text-gray-400'}`}>
+                  <Navigation className="w-6 h-6" /><span className="text-[10px] font-bold">行程</span>
+                </button>
+                <button onClick={() => setActiveTab('budget')} className={`flex flex-col items-center gap-1 p-2 rounded-lg transition active:scale-95 ${activeTab === 'budget' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                  <DollarSign className="w-6 h-6" /><span className="text-[10px] font-bold">預算</span>
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<TravelPlanner />);
+    </script>
+</body>
+</html>
